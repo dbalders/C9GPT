@@ -19,10 +19,10 @@ def get_db_connection():
 @app.route('/execute_query', methods=['POST'])
 def execute_query():
     print("Executing query")
-    # Get the query from the request
     data = request.json
     print(data)
     user_query = data.get('user_query')
+    thread_id = request.args.get('thread_id')
 
     if not user_query:
         return jsonify({"error": "No user query provided"}), 400
@@ -30,13 +30,14 @@ def execute_query():
     try:
         print(f"User query: {user_query}")
         # Send the query to the GPT agent
-        result = run_gpt_agent(user_query)
-
+        print("Running GPT agent")
+        result = run_gpt_agent(user_query, thread_id)
+        print(f"Result: {result}")
         # Stream back the results
-        response = ""
-        for chunk in result:
-            response += chunk
-        return jsonify({"summary": response}), 200
+        # response = ""
+        # for chunk in result:
+        #     response += chunk
+        return jsonify({"summary": result})
 
     except Exception as e:
         print(f"Error occurred: {e}")

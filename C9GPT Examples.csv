@@ -1,0 +1,15 @@
+What are our recent results?,"SELECT date, format_type, team1_name, team1_id, team2_name, team2_id, winnerTeam_name, winnerTeam_id, vetoes, maps, players FROM matches WHERE status = ""Over"" ORDER BY date DESC LIMIT 5;"
+How have our recent results been on mirage?,"SELECT maps, team1_name, team2_name FROM matches WHERE maps LIKE '%mirage%' ORDER BY date DESC LIMIT 5;"
+What are our last 10 results on anubis?,"SELECT maps, team1_name, team2_name FROM matches WHERE maps LIKE '%anubis%' ORDER BY date DESC LIMIT 10;"
+What map does Cloud9 ban the most?,SELECT vetoes FROM matches WHERE maps LIKE '%mirage%' ORDER BY date DESC LIMIT 10;
+,
+What are Ax1Le's most recent stats?,"SELECT month, year, kills, headshots, deaths, kdRatio, damagePerRound, mapsPlayed, roundsPlayed, killsPerRound, assistsPerRound, deathsPerRound, rating2, openingKillRatio, openingKillRating FROM player_stats WHERE ign = 'Ax1Le' COLLATE NOCASE LIMIT 3;"
+Is Ax1Le's rating improving over the last 6 months?,"SELECT month, year, rating2, roundsPlayed FROM player_stats WHERE ign = 'Ax1Le' COLLATE NOCASE LIMIT 6;"
+,
+How many kills per round does Ax1Le get?,"SELECT kills, roundsPlayed, killsPerRound FROM player_stats WHERE ign = 'Ax1Le' COLLATE NOCASE LIMIT 3;"
+,
+,
+What are our upcoming matches?,"SELECT title, date, team1, team2, status FROM matches WHERE status = \""Scheduled\"" ORDER BY date ASC;"
+,
+,
+What are Cloud9's stats for the last 4 months?,"Select * from team_stats WHERE name = 'Cloud9' COLLATE NOCASE ORDER BY year DESC, month DESC limit 4;"

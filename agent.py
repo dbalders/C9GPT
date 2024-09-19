@@ -3,16 +3,21 @@ from langgraph.graph import StateGraph, START, END
 from langsmith import traceable
 from langsmith.wrappers import wrap_openai
 import sqlite3
+from langgraph.checkpoint.memory import MemorySaver
+from langgraph.checkpoint.sqlite import SqliteSaver
+from langgraph.graph import StateGraph
 import openai
 from litellm import completion
 from dotenv import load_dotenv
 import os
 from fuzzywuzzy import process
-from langgraph.checkpoint.memory import MemorySaver
 
 load_dotenv()
 
-client = wrap_openai(openai.Client())
+conn = sqlite3.connect('my_persistence.sqlite', check_same_thread=False)
+saver = SqliteSaver(conn)
+
+openai_client = wrap_openai(openai.Client())
 
 class AgentState(TypedDict):
     originalQuery: str
@@ -30,28 +35,52 @@ class AgentState(TypedDict):
 workflow_graph = StateGraph(AgentState)
 memory = MemorySaver()
 
-schema = "Database Schema:\
-1. teams: id [PK], name, logo, facebook, twitter, instagram, country, rank, rankingDevelopment\
-2. team_news: id, team_id (FK), name, link\
-3. players: id [PK], name, timeOnTeam, mapsPlayed, type\
-4. player_stats: id (FK), month, year, ign, image, age, country, team, kills, headshots, deaths, kdRatio, damagePerRound, grenadeDamagePerRound, mapsPlayed, roundsPlayed, killsPerRound, assistsPerRound, deathsPerRound, savedByTeammatePerRound, savedTeammatesPerRound, rating1, rating2, roundsWithKills, zeroKillRounds, oneKillRounds, twoKillRounds, threeKillRounds, fourKillRounds, fiveKillRounds, openingKills, openingDeaths, openingKillRatio, openingKillRating, teamWinPercentAfterFirstKill, firstKillInWonRounds, rifleKills, sniperKills, smgKills, pistolKills, grenadeKills, otherKills, last_updated (PK: id, month, year)\
-5. player_matches: id (FK), date, team1, team2, map, kills, deaths, rating, mapStatsId (PK: id, mapStatsId)\
-6. matches: id, statsId, title, date, significance, format_type, format_location, status, hasScorebot, team1_name, team1_id, team1_rank, team2_name, team2_id, team2_rank, winnerTeam_name, winnerTeam_id, winnerTeam_rank, vetoes, event, odds, maps, players, streams, demos, highlightedPlayers, headToHead, highlights, playerOfTheMatch\
-7. team_stats: id, month, year, name, mapsPlayed, wins, draws, losses, totalKills, totalDeaths, roundsPlayed, kdRatio, currentLineup, historicPlayers, standins, substitutes, matches, mapStats, events, length (PK: id, month, year)"
+def get_compact_sqlite_schema(database_path):
+    conn = sqlite3.connect(database_path)
+    cursor = conn.cursor()
+
+    # Get all table names
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+    tables = cursor.fetchall()
+
+    schema = ""
+    
+    for table in tables:
+        table_name = table[0]
+        schema += f"{table_name}: "
+
+        # Get the column information for each table
+        cursor.execute(f"PRAGMA table_info({table_name});")
+        columns = cursor.fetchall()
+
+        column_descriptions = []
+        for column in columns:
+            col_name = column[1]
+            col_type = column[2]
+            col_is_pk = "PK" if column[5] == 1 else ""
+            column_descriptions.append(f"{col_name} {col_type} {col_is_pk}".strip())
+        
+        schema += ", ".join(column_descriptions) + "\n"
+
+    conn.close()
+
+    return schema
 
 player_names = "Official Player Names (Adjust to these): Ax1le, Interz, Boombl4, HeavyGod, Icy"
 
+schema = get_compact_sqlite_schema(os.getenv('DATABASE_NAME'))
+
 examples = "Examples:\
 1. User Query: What are the results of past matches?\
-   SQL Query: `SELECT title, date, team1, team2, winnerTeam, status FROM matches WHERE status = \"Over\" ORDER BY date DESC;`\
+   SQL Query: `SELECT date, format_type, team1_name, team1_id, team2_name, team2_id, winnerTeam_name, winnerTeam_id, vetoes, maps, players FROM matches WHERE status = 'Over' ORDER BY date DESC LIMIT 5;`\
 2. User Query: What are Ax1Le's most recent stats?\
-   SQL Query: `SELECT * FROM player_stats WHERE ign = 'Ax1Le' COLLATE NOCASE LIMIT 1;`\
+   SQL Query: `SELECT kills, headshots, deaths, kdRatio, damagePerRound, mapsPlayed, roundsPlayed, killsPerRound, assistsPerRound, deathsPerRound, rating2, openingKillRatio, openingKillRating FROM player_stats WHERE ign = 'Ax1Le' COLLATE NOCASE LIMIT 3;`\
 3. User Query: How many kills per round does Ax1Le get?\
-   SQL Query: `SELECT killsPerRound FROM player_stats WHERE ign = 'Ax1Le' COLLATE NOCASE LIMIT 1;`\
+   SQL Query: `SELECT kills, roundsPlayed, killsPerRound FROM player_stats WHERE ign = 'Ax1Le' COLLATE NOCASE LIMIT 3;`\
 4. User Query: What are the upcoming matches?\
-   SQL Query: `SELECT title, date, team1, team2, status FROM matches WHERE status = \"Scheduled\" ORDER BY date ASC;`\
+   SQL Query: `SELECT title, event, date, team1_name , team2_name , status FROM matches WHERE status = 'Scheduled' ORDER BY date ASC;`\
 5. User Query: What are Cloud9's stats for the last 3 months?\
-    SQL Query: `Select * from team_stats WHERE name = \"Cloud9\" COLLATE NOCASE and year = strftime('%Y', 'now') and \"month\" >= strftime('%m', 'now', '-3 months');`"
+    SQL Query: `Select * from team_stats WHERE name = 'Cloud9' COLLATE NOCASE ORDER BY year DESC, month DESC limit 3;`"
 
 @traceable
 def query_local(user_query):
@@ -72,6 +101,7 @@ def decide_request(state: AgentState) -> AgentState:
                 f"Respond with just 'API' or 'Follow Up'. \n\nUser Query: {state["originalQuery"]}\n\nCurrent Data: {state["sqlQueryResults"]}")
 
     decision = query_local(context)
+    print("State", state)
     print("Decision: ", decision)
     print(state)
     return {"pathDecision": decision}
@@ -86,14 +116,18 @@ def get_name_from_query(state: AgentState) -> AgentState:
 @traceable
 def generate_sql_query(state: AgentState) -> AgentState:
     print("in generate_sql_query")
+
     context = (f"Your task is to interpret the user's query, generate the appropriate SQLite query that will be used for execution."
         f"Do not make up any fields sql, only use the ones given for any request. Double check them to make sure you are using a true field that exists in the table. Return just the sql query and DO NOT format the query using triple backticks or code blocks."
-         f"\n\n{schema}\n\n{examples}\n\n{player_names}\n\n{state['originalQuery']}")
+         f"\n\n{schema}\n\n{player_names}\n\n{state['originalQuery']}")
     
 
-    sql_query = query_local(context)
-
-    return {"sqlQuery": sql_query}
+    sql_query = openai_client.chat.completions.create(
+        messages=[{"role": "user", "content": context}],
+        model=os.getenv('FINE_TUNED_MODEL')
+    )
+    print("SQL Query: ", sql_query.choices[0].message.content)
+    return {"sqlQuery": sql_query.choices[0].message.content}
 
 @traceable
 def check_name_exists(state: AgentState) -> AgentState:
@@ -176,12 +210,13 @@ def execute_query(state: AgentState) -> AgentState:
 
 @traceable
 def fix_query_error(state: AgentState) -> AgentState:
-    state["retryCount"] += 1
-    context = (f"An error has occured in this SQLite query. Adjust the query to fix the error so it can be run again. Use the schema and examples to help solve it."
-    f"\n\n{schema}\n\n{examples}\n\nSQL Error: {state["sqlError"]}\n\nSQL Query: {state["sqlQuery"]}\n\n Return only the adjusted query.")
+    sqlRetryCount = state["sqlRetryCount"] + 1
+    context = (f"An error has occured in this SQLite query. Adjust the query to fix the error so it can be run again. Use the table schema and examples to help solve it. Make sure all columns actually exist."
+    f"\n\n{schema}\n\n{examples}\n\nSQL Error: {state["sqlError"]}\n\nSQL Query: {state["sqlQuery"]}\n\n Return only the adjusted query."
+    f"Return it as a string and DO NOT format the query using triple backticks or code blocks.")
     
     sql_query = query_local(context)
-    return {"sql": sql_query}
+    return {"sqlQuery": sql_query, "sqlError": None, "sqlQueryResults": None, "sqlRetryCount": sqlRetryCount}
 
 @traceable
 def summarize_results(state: AgentState) -> AgentState:
@@ -248,7 +283,7 @@ workflow_graph.add_edge("Adjust SQL Name", "Execute Query")
 workflow_graph.add_conditional_edges(
     "Execute Query",
     lambda state: "Summarize Results" if state["sqlQueryResults"] else (
-        "Stop Execution" if state["retryCount"] >= 3 else "Fix Query Error"
+        "Stop Execution" if state["sqlRetryCount"] >= 3 else "Fix Query Error"
     ),
     {
         "Summarize Results": "Summarize Results",
@@ -259,41 +294,53 @@ workflow_graph.add_conditional_edges(
 workflow_graph.add_edge("Fix Query Error", "Execute Query")
 workflow_graph.add_edge("Summarize Results", END)
 
-# graph = workflow_graph.compile(checkpointer=memory)
-graph = workflow_graph.compile()
+graph = workflow_graph.compile(checkpointer=saver)
+# print(graph.get_graph().draw_ascii())
 
-def run_gpt_agent(query: str) -> dict:
-    initial_state = {
-        "originalQuery": query,
-        "pathDecision": None,
-        "name": None,
-        "bestNameMatch": None,
-        "nameExists": None,
-        "sqlQuery": None,
-        "sqlQueryResults": None,
-        "sqlError": None,
-        "summary": None,
-        "sqlRetryCount": 0
-    }
-    result = graph.invoke(initial_state)
+def run_gpt_agent(query: str, thread_id: int) -> dict:
+    config = {"configurable": {"thread_id": thread_id}}
+    current_state = graph.get_state(config)
+    print("Current State: ", current_state)
+    if not current_state.values:
+        initial_state = {
+            "originalQuery": query,
+            "pathDecision": None,
+            "name": None,
+            "bestNameMatch": None,
+            "nameExists": None,
+            "sqlQuery": None,
+            "sqlQueryResults": None,
+            "sqlError": None,
+            "summary": None,
+            "sqlRetryCount": 0
+        }
+    else:
+        initial_state = {
+            **current_state.values,  # Use previous state data
+            "originalQuery": query  # Update with the new query
+        }
+    
+    print("Thread ID: ", thread_id)
+    print("Current State: ", current_state)
+    result = graph.invoke(initial_state, config)
     # Stream back the summary in chunks
     # summary_generator = result["summary"]
     # if summary_generator is not None:
     #     for chunk in summary_generator:
     #         yield chunk
 
-    summary = result.get("summary")
+    summary = result.get("sqlQueryResults")
 
     print("Summary: ", summary)
     
     if summary:
-        return {"summary": summary}
+        return {"summary": summary, "sqlQuery": result["sqlQuery"]}
     
     return {"error": "No summary generated"}
 
 # Example query
 if __name__ == "__main__":
-    query = "How many kills does axile have this month?"
+    query = "How many kills does axile have?"
     initial_state = {
         "originalQuery": query,
         "pathDecision": None,
