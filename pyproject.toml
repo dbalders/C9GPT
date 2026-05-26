@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "c9win"
+version = "0.1.0"
+description = "A Python project for c9win with an agent using LangGraph, SQLite, and OpenAI"
+authors = [
+    { name = "Your Name", email = "you@example.com" }
+]
+dependencies = [
+    "langgraph>=0.2.28",  # You can set the minimum version as needed
+    "langsmith>=0.1.0",
+    "langgraph-checkpoint-sqlite>=0.1.0",
+    "litellm>=0.1.0",
+    "python-dotenv>=0.21.0",
+    "fuzzywuzzy[speedup]>=0.18.0",  # fuzzywuzzy with Levenshtein support
+    "openai>=0.27.0",
+    "typing_extensions>=4.0.0",
+    "python-dateutil>=2.8.0",
+]
+
+[tool.poetry.dev-dependencies]
+pytest = "^7.0.0"
+
+[tool.black]
+line-length = 88
+
+[tool.isort]
+profile = "black"

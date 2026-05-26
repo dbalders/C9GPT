@@ -1,0 +1,8 @@
+langgraph
+langgraph-checkpoint-sqlite
+langchain_core
+langsmith
+openai
+litellm
+fuzzywuzzy
+python-dotenv

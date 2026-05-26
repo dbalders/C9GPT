@@ -4,6 +4,7 @@ import sqlite3
 from dotenv import load_dotenv
 import os
 from agent import run_gpt_agent
+from langchain_core.runnables.config import RunnableConfig
 
 load_dotenv()
 
@@ -31,7 +32,8 @@ def execute_query():
         print(f"User query: {user_query}")
         # Send the query to the GPT agent
         print("Running GPT agent")
-        result = run_gpt_agent(user_query, thread_id)
+        config = RunnableConfig(query=user_query, thread_id=thread_id)
+        result = run_gpt_agent(config)
         print(f"Result: {result}")
         # Stream back the results
         # response = ""

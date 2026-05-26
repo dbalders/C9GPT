@@ -127,7 +127,7 @@ def decide_request(state: AgentState) -> AgentState:
                f"Read the user query and check the current data to see if the answer is found. If the explicit answer is not found, it needs an API call."
                f"If you are at all unsure, respond with 'API'. If you are completely sure that the summary contains the data, respond with 'Follow Up'."
                 f"If current data is blank, it needs an API call."
-                f"Respond with just 'API' or 'Follow Up'. \n\nUser Query: {state["originalQuery"]}\n\nPrevious Summary: {state["summary"]}")
+                f"Respond with just 'API' or 'Follow Up'. \n\nUser Query: {state['originalQuery']}\n\nPrevious Summary: {state['summary']}")
 
     decision = query_local(context)
     print("State", state)
@@ -242,7 +242,7 @@ def execute_query(state: AgentState) -> AgentState:
 def fix_query_error(state: AgentState) -> AgentState:
     sqlRetryCount = state["sqlRetryCount"] + 1
     context = (f"An error has occured in this SQLite query. Adjust the query to fix the error so it can be run again. Use the table schema and examples to help solve it. Make sure all columns actually exist."
-    f"\n\n{schema}\n\n{examples}\n\nSQL Error: {state["sqlError"]}\n\nSQL Query: {state["sqlQuery"]}\n\n Return only the adjusted query."
+    f"\n\n{schema}\n\n{examples}\n\nSQL Error: {state['sqlError']}\n\nSQL Query: {state['sqlQuery']}\n\n Return only the adjusted query."
     f"Return it as a string and DO NOT format the query using triple backticks or code blocks.")
     
     sql_query = query_local(context)
@@ -251,7 +251,7 @@ def fix_query_error(state: AgentState) -> AgentState:
 @traceable
 def summarize_results(state: AgentState) -> AgentState:
     context = (f"Summarize the results of the query for the user based on their question and the query result."
-    f"\n\nOriginal Query: {state["originalQuery"]}\n\nQuery Results: {state["sqlQueryResults"]}")
+    f"\n\nOriginal Query: {state['originalQuery']}\n\nQuery Results: {state['sqlQueryResults']}")
     
     summary = query_local(context)
     return {"summary": summary}
@@ -259,7 +259,7 @@ def summarize_results(state: AgentState) -> AgentState:
 @traceable
 def summarize_follow_up(state: AgentState) -> AgentState:
     context = (f"Summarize the follow up question using the original query and the state from the query."
-    f"\n\nOriginal Query: {state["originalQuery"]}\n\nQuery Results: {state["sqlQueryResults"]}")
+    f"\n\nOriginal Query: {state['originalQuery']}\n\nQuery Results: {state['sqlQueryResults']}")
     
     summary = query_local(context)
     return {"summary": summary}
@@ -391,5 +391,6 @@ if __name__ == "__main__":
         "summary": None,
         "sqlRetryCount": 0
     }
-    response = graph.invoke(initial_state)
+    config = {"configurable": {"thread_id": 1}}
+    response = graph.invoke(initial_state, config)
     print(response)
